@@ -1,0 +1,897 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>San Francisco 3D Diorama</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { overflow: hidden; background: #0a0a1a; font-family: 'Segoe UI', system-ui, sans-serif; }
+  canvas { display: block; }
+
+  #info-panel {
+    position: absolute; top: 20px; left: 20px;
+    background: rgba(10, 10, 30, 0.85);
+    backdrop-filter: blur(10px);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 12px; padding: 18px 22px;
+    color: #e0e0e0; z-index: 10;
+    max-width: 280px;
+  }
+  #info-panel h1 {
+    font-size: 18px; font-weight: 700;
+    background: linear-gradient(135deg, #ff6b35, #f7c948);
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+    margin-bottom: 6px;
+  }
+  #info-panel p { font-size: 12px; color: #999; line-height: 1.5; }
+
+  #monument-tooltip {
+    position: absolute; display: none;
+    background: rgba(10, 10, 30, 0.92);
+    backdrop-filter: blur(8px);
+    border: 1px solid rgba(255,255,255,0.15);
+    border-radius: 8px; padding: 10px 14px;
+    color: #fff; font-size: 13px; font-weight: 600;
+    pointer-events: none; z-index: 20;
+    transform: translate(-50%, -120%);
+  }
+  #monument-tooltip .subtitle {
+    font-size: 11px; font-weight: 400; color: #aaa; margin-top: 2px;
+  }
+
+  #controls-hint {
+    position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%);
+    background: rgba(10, 10, 30, 0.7);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 8px; padding: 8px 16px;
+    color: #777; font-size: 11px; z-index: 10;
+  }
+
+  #legend {
+    position: absolute; top: 20px; right: 20px;
+    background: rgba(10, 10, 30, 0.85);
+    backdrop-filter: blur(10px);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 12px; padding: 14px 18px;
+    color: #e0e0e0; z-index: 10; font-size: 12px;
+  }
+  #legend h3 { font-size: 13px; margin-bottom: 8px; color: #f7c948; }
+  .legend-item { display: flex; align-items: center; margin: 5px 0; }
+  .legend-dot {
+    width: 10px; height: 10px; border-radius: 50%;
+    margin-right: 8px; flex-shrink: 0;
+  }
+</style>
+</head>
+<body>
+
+<div id="info-panel">
+  <h1>San Francisco 3D Diorama</h1>
+  <p>Low-poly landmarks on an accurate city map. Drag to rotate, scroll to zoom, right-drag to pan.</p>
+</div>
+
+<div id="legend">
+  <h3>Landmarks</h3>
+  <div class="legend-item"><div class="legend-dot" style="background:#c0392b"></div> Golden Gate Bridge</div>
+  <div class="legend-item"><div class="legend-dot" style="background:#d4a762"></div> Ferry Building</div>
+  <div class="legend-item"><div class="legend-dot" style="background:#ecf0f1"></div> Transamerica Pyramid</div>
+  <div class="legend-item"><div class="legend-dot" style="background:#3498db"></div> Coit Tower</div>
+  <div class="legend-item"><div class="legend-dot" style="background:#2ecc71"></div> Palace of Fine Arts</div>
+</div>
+
+<div id="monument-tooltip">
+  <div class="name"></div>
+  <div class="subtitle"></div>
+</div>
+
+<div id="controls-hint">
+  Left-drag: Rotate &nbsp;|&nbsp; Right-drag: Pan &nbsp;|&nbsp; Scroll: Zoom &nbsp;|&nbsp; Hover landmarks for info
+</div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+// ─── Scene Setup ────────────────────────────────────────────────
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x0a0a1a);
+scene.fog = new THREE.FogExp2(0x0a0a1a, 0.0015);
+
+const camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 2000);
+camera.position.set(80, 120, 140);
+
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.1;
+document.body.appendChild(renderer.domElement);
+
+// ─── Controls ───────────────────────────────────────────────────
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+controls.dampingFactor = 0.08;
+controls.maxPolarAngle = Math.PI / 2.15;
+controls.minDistance = 30;
+controls.maxDistance = 400;
+controls.target.set(0, 0, 0);
+
+// ─── Lighting ───────────────────────────────────────────────────
+const ambientLight = new THREE.AmbientLight(0x404060, 0.6);
+scene.add(ambientLight);
+
+const sunLight = new THREE.DirectionalLight(0xffeedd, 1.8);
+sunLight.position.set(80, 120, 60);
+sunLight.castShadow = true;
+sunLight.shadow.mapSize.set(2048, 2048);
+sunLight.shadow.camera.near = 1;
+sunLight.shadow.camera.far = 400;
+sunLight.shadow.camera.left = -150;
+sunLight.shadow.camera.right = 150;
+sunLight.shadow.camera.top = 150;
+sunLight.shadow.camera.bottom = -150;
+scene.add(sunLight);
+
+const fillLight = new THREE.DirectionalLight(0x6688cc, 0.4);
+fillLight.position.set(-60, 40, -30);
+scene.add(fillLight);
+
+const rimLight = new THREE.DirectionalLight(0xff8844, 0.3);
+rimLight.position.set(0, 10, -80);
+scene.add(rimLight);
+
+// ─── Materials ──────────────────────────────────────────────────
+const mat = {
+  land:       new THREE.MeshStandardMaterial({ color: 0x2d3436, roughness: 0.9, flatShading: true }),
+  landLight:  new THREE.MeshStandardMaterial({ color: 0x3d4446, roughness: 0.85, flatShading: true }),
+  water:      new THREE.MeshStandardMaterial({ color: 0x0c2d48, roughness: 0.3, metalness: 0.1, flatShading: true }),
+  road:       new THREE.MeshStandardMaterial({ color: 0x555555, roughness: 0.8 }),
+  park:       new THREE.MeshStandardMaterial({ color: 0x1a472a, roughness: 0.9, flatShading: true }),
+  bridge:     new THREE.MeshStandardMaterial({ color: 0xc0392b, roughness: 0.6, metalness: 0.3, flatShading: true }),
+  bridgeCable:new THREE.MeshStandardMaterial({ color: 0xa93226, roughness: 0.5, metalness: 0.4 }),
+  concrete:   new THREE.MeshStandardMaterial({ color: 0xbdc3c7, roughness: 0.7, flatShading: true }),
+  pyramid:    new THREE.MeshStandardMaterial({ color: 0xecf0f1, roughness: 0.4, metalness: 0.2, flatShading: true }),
+  ferry:      new THREE.MeshStandardMaterial({ color: 0xd4a762, roughness: 0.6, flatShading: true }),
+  ferryRoof:  new THREE.MeshStandardMaterial({ color: 0x8b7355, roughness: 0.7, flatShading: true }),
+  coit:       new THREE.MeshStandardMaterial({ color: 0x3498db, roughness: 0.5, metalness: 0.1, flatShading: true }),
+  coitWhite:  new THREE.MeshStandardMaterial({ color: 0xecf0f1, roughness: 0.5, flatShading: true }),
+  palace:     new THREE.MeshStandardMaterial({ color: 0x2ecc71, roughness: 0.6, flatShading: true }),
+  palaceCol:  new THREE.MeshStandardMaterial({ color: 0xc9a86c, roughness: 0.5, metalness: 0.1, flatShading: true }),
+  building:   new THREE.MeshStandardMaterial({ color: 0x444455, roughness: 0.8, flatShading: true }),
+  buildingLt: new THREE.MeshStandardMaterial({ color: 0x555566, roughness: 0.8, flatShading: true }),
+  grid:       new THREE.LineBasicMaterial({ color: 0x1a1a2e, transparent: true, opacity: 0.4 }),
+};
+
+// ─── Coordinate System ──────────────────────────────────────────
+// Map SF geo coords to scene coords.  Center ~ (37.785, -122.42)
+// 1 degree lat ≈ 111km, 1 degree lon ≈ 85km at this latitude
+// Scale: 1 scene unit ≈ ~45m
+const CENTER_LAT = 37.785;
+const CENTER_LON = -122.42;
+const SCALE_LAT = 2500;  // scene units per degree latitude
+const SCALE_LON = 1900;  // scene units per degree longitude
+
+function geoToScene(lat, lon) {
+  return new THREE.Vector3(
+    (lon - CENTER_LON) * SCALE_LON,
+    0,
+    -(lat - CENTER_LAT) * SCALE_LAT
+  );
+}
+
+// ─── SF Coastline (simplified polygon) ──────────────────────────
+const sfOutline = [
+  [37.8105, -122.4775], [37.8080, -122.4735], [37.8070, -122.4680],
+  [37.8090, -122.4580], [37.8110, -122.4540], [37.8085, -122.4500],
+  [37.8120, -122.4350], [37.8100, -122.4200], [37.8080, -122.4100],
+  [37.8055, -122.4030], [37.8020, -122.3970], [37.7980, -122.3940],
+  [37.7930, -122.3920], [37.7890, -122.3900], [37.7850, -122.3890],
+  [37.7800, -122.3880], [37.7750, -122.3885], [37.7700, -122.3900],
+  [37.7640, -122.3865], [37.7580, -122.3815], [37.7530, -122.3810],
+  [37.7480, -122.3820], [37.7430, -122.3870], [37.7380, -122.3920],
+  [37.7330, -122.3970], [37.7280, -122.4020], [37.7230, -122.4050],
+  [37.7185, -122.4100], [37.7130, -122.4150], [37.7085, -122.4180],
+  [37.7080, -122.4260], [37.7085, -122.4350], [37.7090, -122.4450],
+  [37.7100, -122.4550], [37.7110, -122.4650], [37.7120, -122.4730],
+  [37.7140, -122.4810], [37.7170, -122.4900], [37.7210, -122.4960],
+  [37.7260, -122.5030], [37.7320, -122.5070], [37.7400, -122.5100],
+  [37.7480, -122.5100], [37.7550, -122.5090], [37.7620, -122.5080],
+  [37.7690, -122.5060], [37.7750, -122.5050], [37.7800, -122.5050],
+  [37.7860, -122.5080], [37.7920, -122.5100], [37.7960, -122.5100],
+  [37.8000, -122.5080], [37.8030, -122.5020], [37.8050, -122.4950],
+  [37.8070, -122.4870], [37.8090, -122.4810], [37.8105, -122.4775],
+];
+
+function buildSFLand() {
+  const shape = new THREE.Shape();
+  const pts = sfOutline.map(([lat, lon]) => geoToScene(lat, lon));
+  shape.moveTo(pts[0].x, pts[0].z);
+  for (let i = 1; i < pts.length; i++) {
+    shape.lineTo(pts[i].x, pts[i].z);
+  }
+  shape.closePath();
+
+  const extrudeSettings = { depth: 2.5, bevelEnabled: true, bevelThickness: 0.5, bevelSize: 0.5, bevelSegments: 2 };
+  const geo = new THREE.ExtrudeGeometry(shape, extrudeSettings);
+  geo.rotateX(-Math.PI / 2);
+  geo.translate(0, -2.5, 0);
+
+  const mesh = new THREE.Mesh(geo, mat.land);
+  mesh.receiveShadow = true;
+  mesh.castShadow = false;
+  scene.add(mesh);
+
+  // Top surface with slight color variation
+  const topGeo = new THREE.ShapeGeometry(shape);
+  topGeo.rotateX(-Math.PI / 2);
+  topGeo.translate(0, 0.05, 0);
+  const topMesh = new THREE.Mesh(topGeo, mat.landLight);
+  topMesh.receiveShadow = true;
+  scene.add(topMesh);
+
+  return mesh;
+}
+
+// ─── Water plane ────────────────────────────────────────────────
+function buildWater() {
+  const geo = new THREE.PlaneGeometry(600, 600, 40, 40);
+  const posAttr = geo.attributes.position;
+  // Store original Y for animation
+  const origY = new Float32Array(posAttr.count);
+  for (let i = 0; i < posAttr.count; i++) {
+    origY[i] = posAttr.getY(i);
+  }
+  geo.rotateX(-Math.PI / 2);
+  geo.translate(0, -2.6, 0);
+
+  const mesh = new THREE.Mesh(geo, mat.water);
+  mesh.receiveShadow = true;
+  scene.add(mesh);
+  return { mesh, posAttr, origY };
+}
+
+// ─── Street grid (simplified) ───────────────────────────────────
+function buildStreetGrid() {
+  const group = new THREE.Group();
+
+  // Major streets as thin lines on the land surface
+  const streets = [
+    // Market Street
+    { from: [37.793, -122.396], to: [37.764, -122.435] },
+    // Mission Street
+    { from: [37.793, -122.396], to: [37.725, -122.420] },
+    // Van Ness Ave
+    { from: [37.805, -122.424], to: [37.765, -122.420] },
+    // Geary Blvd
+    { from: [37.787, -122.410], to: [37.780, -122.510] },
+    // Lombard St area
+    { from: [37.802, -122.418], to: [37.802, -122.440] },
+    // Columbus Ave
+    { from: [37.800, -122.410], to: [37.790, -122.407] },
+    // 19th Ave / Park Presidio
+    { from: [37.790, -122.475], to: [37.720, -122.475] },
+    // Sunset Blvd
+    { from: [37.760, -122.495], to: [37.720, -122.495] },
+    // Embarcadero
+    { from: [37.808, -122.410], to: [37.790, -122.390] },
+    // 3rd Street
+    { from: [37.785, -122.395], to: [37.730, -122.395] },
+  ];
+
+  streets.forEach(st => {
+    const from = geoToScene(st.from[0], st.from[1]);
+    const to = geoToScene(st.to[0], st.to[1]);
+    const points = [new THREE.Vector3(from.x, 0.15, from.z), new THREE.Vector3(to.x, 0.15, to.z)];
+    const lineGeo = new THREE.BufferGeometry().setFromPoints(points);
+    const line = new THREE.Line(lineGeo, mat.grid);
+    group.add(line);
+  });
+
+  scene.add(group);
+}
+
+// ─── Parks ──────────────────────────────────────────────────────
+function buildParks() {
+  // Golden Gate Park (simplified rectangle)
+  const ggPark = new THREE.BoxGeometry(52, 0.6, 8);
+  const ggParkMesh = new THREE.Mesh(ggPark, mat.park);
+  const ggPos = geoToScene(37.769, -122.478);
+  ggParkMesh.position.set(ggPos.x, 0.3, ggPos.z);
+  ggParkMesh.receiveShadow = true;
+  scene.add(ggParkMesh);
+
+  // Presidio area
+  const presidio = new THREE.BoxGeometry(18, 0.5, 14);
+  const presidioMesh = new THREE.Mesh(presidio, mat.park);
+  const prPos = geoToScene(37.799, -122.466);
+  presidioMesh.position.set(prPos.x, 0.25, prPos.z);
+  presidioMesh.receiveShadow = true;
+  scene.add(presidioMesh);
+
+  // Small trees scattered in parks
+  const treeMat = new THREE.MeshStandardMaterial({ color: 0x1a5c2a, roughness: 0.9, flatShading: true });
+  const trunkMat = new THREE.MeshStandardMaterial({ color: 0x5c3a1e, roughness: 0.9 });
+
+  function addTree(x, y, z, scale) {
+    const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.15 * scale, 0.2 * scale, 1.2 * scale, 5), trunkMat);
+    trunk.position.set(x, y + 0.6 * scale, z);
+    trunk.castShadow = true;
+    scene.add(trunk);
+
+    const crown = new THREE.Mesh(new THREE.ConeGeometry(0.8 * scale, 1.8 * scale, 6), treeMat);
+    crown.position.set(x, y + 1.8 * scale, z);
+    crown.castShadow = true;
+    scene.add(crown);
+  }
+
+  // Trees in GG Park
+  for (let i = 0; i < 30; i++) {
+    const p = geoToScene(37.769 + (Math.random() - 0.5) * 0.003, -122.478 + (Math.random() - 0.5) * 0.025);
+    addTree(p.x, 0.3, p.z, 0.6 + Math.random() * 0.5);
+  }
+  // Trees in Presidio
+  for (let i = 0; i < 15; i++) {
+    const p = geoToScene(37.799 + (Math.random() - 0.5) * 0.006, -122.466 + (Math.random() - 0.5) * 0.01);
+    addTree(p.x, 0.25, p.z, 0.5 + Math.random() * 0.6);
+  }
+}
+
+// ─── Background buildings (downtown cluster) ────────────────────
+function buildDowntown() {
+  const group = new THREE.Group();
+  const buildingData = [
+    // Financial district cluster
+    { lat: 37.7915, lon: -122.4000, w: 2, d: 2, h: 8 },
+    { lat: 37.7908, lon: -122.4020, w: 2.5, d: 2, h: 10 },
+    { lat: 37.7900, lon: -122.3990, w: 1.8, d: 2.5, h: 7 },
+    { lat: 37.7895, lon: -122.4010, w: 2, d: 1.8, h: 12 },
+    { lat: 37.7920, lon: -122.4030, w: 2.2, d: 2.2, h: 6 },
+    { lat: 37.7888, lon: -122.3985, w: 1.5, d: 2, h: 9 },
+    { lat: 37.7905, lon: -122.4050, w: 2, d: 2, h: 5 },
+    { lat: 37.7910, lon: -122.3970, w: 1.8, d: 1.8, h: 11 },
+    { lat: 37.7898, lon: -122.4040, w: 2.5, d: 1.5, h: 8 },
+    { lat: 37.7925, lon: -122.4015, w: 1.5, d: 2.5, h: 7 },
+    // SoMa area
+    { lat: 37.7870, lon: -122.3990, w: 3, d: 2, h: 5 },
+    { lat: 37.7860, lon: -122.4010, w: 2, d: 3, h: 4 },
+    { lat: 37.7855, lon: -122.3975, w: 2.5, d: 2.5, h: 6 },
+    // Nob Hill
+    { lat: 37.7930, lon: -122.4120, w: 2, d: 2, h: 4 },
+    { lat: 37.7935, lon: -122.4140, w: 1.8, d: 2.2, h: 5 },
+    { lat: 37.7925, lon: -122.4100, w: 2.5, d: 2, h: 3.5 },
+  ];
+
+  buildingData.forEach(b => {
+    const geo = new THREE.BoxGeometry(b.w, b.h, b.d);
+    const useMat = Math.random() > 0.5 ? mat.building : mat.buildingLt;
+    const mesh = new THREE.Mesh(geo, useMat);
+    const pos = geoToScene(b.lat, b.lon);
+    mesh.position.set(pos.x, b.h / 2 + 0.1, pos.z);
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    group.add(mesh);
+  });
+
+  scene.add(group);
+}
+
+// ─── MONUMENTS ──────────────────────────────────────────────────
+const interactiveObjects = [];
+
+// ── Golden Gate Bridge ──────────────────────────────────────────
+function buildGoldenGateBridge() {
+  const group = new THREE.Group();
+  group.userData = {
+    name: 'Golden Gate Bridge',
+    subtitle: 'Opened 1937 · Span: 4,200 ft · Art Deco',
+    isMonument: true
+  };
+
+  const bridgeStart = geoToScene(37.8080, -122.4735);
+  const bridgeEnd = geoToScene(37.8320, -122.4790);
+
+  const midX = (bridgeStart.x + bridgeEnd.x) / 2;
+  const midZ = (bridgeStart.z + bridgeEnd.z) / 2;
+  const dx = bridgeEnd.x - bridgeStart.x;
+  const dz = bridgeEnd.z - bridgeStart.z;
+  const length = Math.sqrt(dx * dx + dz * dz);
+  const angle = Math.atan2(dx, dz);
+
+  // Main deck
+  const deckGeo = new THREE.BoxGeometry(4.5, 0.6, length);
+  const deck = new THREE.Mesh(deckGeo, mat.bridge);
+  deck.position.set(midX, 4, midZ);
+  deck.rotation.y = angle;
+  deck.castShadow = true;
+  group.add(deck);
+
+  // Towers
+  const towerPositions = [0.3, 0.7];
+  towerPositions.forEach(t => {
+    const tx = bridgeStart.x + dx * t;
+    const tz = bridgeStart.z + dz * t;
+
+    // Tower legs
+    for (const offset of [-1.8, 1.8]) {
+      const perpX = Math.cos(angle) * offset;
+      const perpZ = -Math.sin(angle) * offset;
+
+      const legGeo = new THREE.BoxGeometry(1.0, 22, 1.0);
+      const leg = new THREE.Mesh(legGeo, mat.bridge);
+      leg.position.set(tx + perpX, 11, tz + perpZ);
+      leg.castShadow = true;
+      group.add(leg);
+    }
+
+    // Cross braces
+    for (const h of [8, 15, 20]) {
+      const braceGeo = new THREE.BoxGeometry(5, 0.6, 0.6);
+      const brace = new THREE.Mesh(braceGeo, mat.bridge);
+      brace.position.set(tx, h, tz);
+      brace.rotation.y = angle + Math.PI / 2;
+      group.add(brace);
+    }
+  });
+
+  // Main cables (catenary curves)
+  for (const side of [-1.8, 1.8]) {
+    const cablePoints = [];
+    for (let i = 0; i <= 40; i++) {
+      const t = i / 40;
+      const x = bridgeStart.x + dx * t + Math.cos(angle) * side;
+      const z = bridgeStart.z + dz * t - Math.sin(angle) * side;
+
+      // Catenary shape between towers
+      let y;
+      if (t < 0.3) {
+        const localT = t / 0.3;
+        y = 4 + (22 - 4) * (1 - 4 * localT * (1 - localT) * 0.6);
+      } else if (t > 0.7) {
+        const localT = (t - 0.7) / 0.3;
+        y = 4 + (22 - 4) * (1 - 4 * localT * (1 - localT) * 0.6);
+      } else {
+        const localT = (t - 0.3) / 0.4;
+        y = 22 - 12 * Math.sin(localT * Math.PI);
+      }
+      cablePoints.push(new THREE.Vector3(x, y, z));
+    }
+    const cableCurve = new THREE.CatmullRomCurve3(cablePoints);
+    const cableGeo = new THREE.TubeGeometry(cableCurve, 40, 0.12, 6, false);
+    const cable = new THREE.Mesh(cableGeo, mat.bridgeCable);
+    group.add(cable);
+  }
+
+  // Vertical suspender cables
+  for (let i = 2; i <= 38; i += 2) {
+    const t = i / 40;
+    const x = bridgeStart.x + dx * t;
+    const z = bridgeStart.z + dz * t;
+
+    let topY;
+    if (t < 0.3) {
+      const localT = t / 0.3;
+      topY = 4 + (22 - 4) * (1 - 4 * localT * (1 - localT) * 0.6);
+    } else if (t > 0.7) {
+      const localT = (t - 0.7) / 0.3;
+      topY = 4 + (22 - 4) * (1 - 4 * localT * (1 - localT) * 0.6);
+    } else {
+      const localT = (t - 0.3) / 0.4;
+      topY = 22 - 12 * Math.sin(localT * Math.PI);
+    }
+
+    for (const side of [-1.8, 1.8]) {
+      const sx = x + Math.cos(angle) * side;
+      const sz = z - Math.sin(angle) * side;
+      const h = topY - 4;
+      if (h > 0.5) {
+        const suspGeo = new THREE.CylinderGeometry(0.04, 0.04, h, 4);
+        const susp = new THREE.Mesh(suspGeo, mat.bridgeCable);
+        susp.position.set(sx, 4 + h / 2, sz);
+        group.add(susp);
+      }
+    }
+  }
+
+  scene.add(group);
+  interactiveObjects.push(group);
+}
+
+// ── Transamerica Pyramid ────────────────────────────────────────
+function buildTransamerica() {
+  const group = new THREE.Group();
+  group.userData = {
+    name: 'Transamerica Pyramid',
+    subtitle: 'Built 1972 · 853 ft · Iconic SF skyline',
+    isMonument: true
+  };
+
+  const pos = geoToScene(37.7952, -122.4028);
+
+  // Main pyramid body - tapered
+  const pyramidGeo = new THREE.CylinderGeometry(0.3, 3.0, 20, 4);
+  const pyramid = new THREE.Mesh(pyramidGeo, mat.pyramid);
+  pyramid.position.set(pos.x, 10.1, pos.z);
+  pyramid.rotation.y = Math.PI / 4;
+  pyramid.castShadow = true;
+  group.add(pyramid);
+
+  // Base wider section
+  const baseGeo = new THREE.BoxGeometry(4.5, 3, 4.5);
+  const base = new THREE.Mesh(baseGeo, mat.concrete);
+  base.position.set(pos.x, 1.6, pos.z);
+  base.castShadow = true;
+  group.add(base);
+
+  // "Wings" (elevator shafts)
+  for (const side of [-1, 1]) {
+    const wingGeo = new THREE.BoxGeometry(0.4, 8, 1.2);
+    const wing = new THREE.Mesh(wingGeo, mat.concrete);
+    wing.position.set(pos.x + side * 2.5, 4.1, pos.z);
+    wing.castShadow = true;
+    group.add(wing);
+  }
+
+  // Spire at top
+  const spireGeo = new THREE.CylinderGeometry(0.05, 0.15, 3, 6);
+  const spire = new THREE.Mesh(spireGeo, mat.concrete);
+  spire.position.set(pos.x, 21.6, pos.z);
+  group.add(spire);
+
+  scene.add(group);
+  interactiveObjects.push(group);
+}
+
+// ── Ferry Building ──────────────────────────────────────────────
+function buildFerryBuilding() {
+  const group = new THREE.Group();
+  group.userData = {
+    name: 'Ferry Building',
+    subtitle: 'Built 1898 · Clock Tower · Marketplace',
+    isMonument: true
+  };
+
+  const pos = geoToScene(37.7956, -122.3935);
+
+  // Main long building
+  const mainGeo = new THREE.BoxGeometry(2.5, 3, 14);
+  const main = new THREE.Mesh(mainGeo, mat.ferry);
+  main.position.set(pos.x, 1.6, pos.z);
+  main.castShadow = true;
+  group.add(main);
+
+  // Roof
+  const roofShape = new THREE.Shape();
+  roofShape.moveTo(-1.8, 0);
+  roofShape.lineTo(0, 1.2);
+  roofShape.lineTo(1.8, 0);
+  roofShape.closePath();
+  const roofExtrudeSettings = { depth: 14, bevelEnabled: false };
+  const roofGeo = new THREE.ExtrudeGeometry(roofShape, roofExtrudeSettings);
+  roofGeo.rotateY(Math.PI / 2);
+  const roof = new THREE.Mesh(roofGeo, mat.ferryRoof);
+  roof.position.set(pos.x, 3.1, pos.z + 7);
+  roof.rotation.y = Math.PI / 2;
+  roof.castShadow = true;
+  group.add(roof);
+
+  // Clock tower base
+  const towerGeo = new THREE.BoxGeometry(2.2, 8, 2.2);
+  const tower = new THREE.Mesh(towerGeo, mat.ferry);
+  tower.position.set(pos.x, 5, pos.z);
+  tower.castShadow = true;
+  group.add(tower);
+
+  // Tower top (narrower)
+  const topGeo = new THREE.BoxGeometry(1.8, 3, 1.8);
+  const top = new THREE.Mesh(topGeo, mat.ferry);
+  top.position.set(pos.x, 10.5, pos.z);
+  top.castShadow = true;
+  group.add(top);
+
+  // Tower spire
+  const spireGeo = new THREE.ConeGeometry(0.8, 3, 4);
+  const spire = new THREE.Mesh(spireGeo, mat.ferryRoof);
+  spire.position.set(pos.x, 13.5, pos.z);
+  spire.rotation.y = Math.PI / 4;
+  spire.castShadow = true;
+  group.add(spire);
+
+  // Clock faces (glowing circles)
+  const clockMat = new THREE.MeshStandardMaterial({ color: 0xfff8e7, emissive: 0xfff8e7, emissiveIntensity: 0.3 });
+  for (let i = 0; i < 4; i++) {
+    const clockGeo = new THREE.CircleGeometry(0.5, 16);
+    const clock = new THREE.Mesh(clockGeo, clockMat);
+    const a = (i * Math.PI) / 2;
+    clock.position.set(
+      pos.x + Math.sin(a) * 1.0,
+      10.5,
+      pos.z + Math.cos(a) * 1.0
+    );
+    clock.rotation.y = a;
+    group.add(clock);
+  }
+
+  // Arched entrance indicators
+  for (let i = -2; i <= 2; i++) {
+    const archGeo = new THREE.BoxGeometry(0.1, 2.2, 1.2);
+    const arch = new THREE.Mesh(archGeo, mat.ferryRoof);
+    arch.position.set(pos.x + 1.3, 1.2, pos.z + i * 2);
+    group.add(arch);
+  }
+
+  scene.add(group);
+  interactiveObjects.push(group);
+}
+
+// ── Coit Tower ──────────────────────────────────────────────────
+function buildCoitTower() {
+  const group = new THREE.Group();
+  group.userData = {
+    name: 'Coit Tower',
+    subtitle: 'Built 1933 · Telegraph Hill · 210 ft',
+    isMonument: true
+  };
+
+  const pos = geoToScene(37.8024, -122.4058);
+
+  // Hill
+  const hillGeo = new THREE.ConeGeometry(5, 3, 8);
+  const hillMat = new THREE.MeshStandardMaterial({ color: 0x2d5a1e, roughness: 0.9, flatShading: true });
+  const hill = new THREE.Mesh(hillGeo, hillMat);
+  hill.position.set(pos.x, 1.5, pos.z);
+  hill.receiveShadow = true;
+  group.add(hill);
+
+  // Tower cylinder
+  const towerGeo = new THREE.CylinderGeometry(1.0, 1.2, 9, 10);
+  const tower = new THREE.Mesh(towerGeo, mat.coitWhite);
+  tower.position.set(pos.x, 7.5, pos.z);
+  tower.castShadow = true;
+  group.add(tower);
+
+  // Fluted columns (ridges around exterior)
+  for (let i = 0; i < 10; i++) {
+    const a = (i / 10) * Math.PI * 2;
+    const ridgeGeo = new THREE.BoxGeometry(0.15, 8, 0.3);
+    const ridge = new THREE.Mesh(ridgeGeo, mat.coit);
+    ridge.position.set(
+      pos.x + Math.sin(a) * 1.15,
+      7.5,
+      pos.z + Math.cos(a) * 1.15
+    );
+    ridge.rotation.y = a;
+    group.add(ridge);
+  }
+
+  // Observation deck
+  const deckGeo = new THREE.CylinderGeometry(1.4, 1.3, 1.2, 10);
+  const deck = new THREE.Mesh(deckGeo, mat.coit);
+  deck.position.set(pos.x, 12.6, pos.z);
+  deck.castShadow = true;
+  group.add(deck);
+
+  // Top cap
+  const capGeo = new THREE.CylinderGeometry(0.5, 1.2, 0.8, 10);
+  const cap = new THREE.Mesh(capGeo, mat.coitWhite);
+  cap.position.set(pos.x, 13.6, pos.z);
+  group.add(cap);
+
+  scene.add(group);
+  interactiveObjects.push(group);
+}
+
+// ── Palace of Fine Arts ─────────────────────────────────────────
+function buildPalaceOfFineArts() {
+  const group = new THREE.Group();
+  group.userData = {
+    name: 'Palace of Fine Arts',
+    subtitle: 'Built 1915 · Greco-Roman rotunda · Marina District',
+    isMonument: true
+  };
+
+  const pos = geoToScene(37.8029, -122.4484);
+
+  // Lagoon (water circle)
+  const lagoonGeo = new THREE.CircleGeometry(5, 24);
+  const lagoonMat = new THREE.MeshStandardMaterial({ color: 0x1a5276, roughness: 0.2 });
+  const lagoon = new THREE.Mesh(lagoonGeo, lagoonMat);
+  lagoon.rotation.x = -Math.PI / 2;
+  lagoon.position.set(pos.x, 0.15, pos.z);
+  group.add(lagoon);
+
+  // Main rotunda dome
+  const domeGeo = new THREE.SphereGeometry(3.5, 12, 8, 0, Math.PI * 2, 0, Math.PI / 2);
+  const dome = new THREE.Mesh(domeGeo, mat.palace);
+  dome.position.set(pos.x, 8, pos.z);
+  dome.castShadow = true;
+  group.add(dome);
+
+  // Rotunda drum (cylinder under dome)
+  const drumGeo = new THREE.CylinderGeometry(3.5, 3.5, 3, 12);
+  const drum = new THREE.Mesh(drumGeo, mat.palaceCol);
+  drum.position.set(pos.x, 6.5, pos.z);
+  drum.castShadow = true;
+  group.add(drum);
+
+  // Columns around rotunda
+  for (let i = 0; i < 12; i++) {
+    const a = (i / 12) * Math.PI * 2;
+    const colGeo = new THREE.CylinderGeometry(0.2, 0.25, 5, 6);
+    const col = new THREE.Mesh(colGeo, mat.palaceCol);
+    col.position.set(
+      pos.x + Math.sin(a) * 3.8,
+      2.6,
+      pos.z + Math.cos(a) * 3.8
+    );
+    col.castShadow = true;
+    group.add(col);
+  }
+
+  // Base platform
+  const platGeo = new THREE.CylinderGeometry(4.5, 5, 0.8, 12);
+  const plat = new THREE.Mesh(platGeo, mat.concrete);
+  plat.position.set(pos.x, 0.4, pos.z);
+  plat.receiveShadow = true;
+  group.add(plat);
+
+  // Colonnade wings (curved rows of columns)
+  for (const side of [-1, 1]) {
+    for (let i = 0; i < 6; i++) {
+      const a = (i / 5 - 0.5) * 0.8 + (side > 0 ? 0 : Math.PI);
+      const colGeo = new THREE.CylinderGeometry(0.15, 0.18, 4, 6);
+      const col = new THREE.Mesh(colGeo, mat.palaceCol);
+      col.position.set(
+        pos.x + Math.sin(a) * 7,
+        2.1,
+        pos.z + Math.cos(a) * 7
+      );
+      col.castShadow = true;
+      group.add(col);
+    }
+
+    // Wing beam on top of columns
+    const beamPoints = [];
+    for (let i = 0; i <= 5; i++) {
+      const a = (i / 5 - 0.5) * 0.8 + (side > 0 ? 0 : Math.PI);
+      beamPoints.push(new THREE.Vector3(
+        pos.x + Math.sin(a) * 7,
+        4.2,
+        pos.z + Math.cos(a) * 7
+      ));
+    }
+    const beamCurve = new THREE.CatmullRomCurve3(beamPoints);
+    const beamGeo = new THREE.TubeGeometry(beamCurve, 10, 0.25, 4, false);
+    const beam = new THREE.Mesh(beamGeo, mat.palaceCol);
+    group.add(beam);
+  }
+
+  scene.add(group);
+  interactiveObjects.push(group);
+}
+
+// ─── Labels (HTML-projected via sprite) ─────────────────────────
+function createLabel(text, position, yOffset) {
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d');
+  canvas.width = 512;
+  canvas.height = 64;
+  ctx.fillStyle = 'rgba(0,0,0,0)';
+  ctx.fillRect(0, 0, 512, 64);
+  ctx.font = 'bold 28px "Segoe UI", system-ui, sans-serif';
+  ctx.fillStyle = '#ffffff';
+  ctx.textAlign = 'center';
+  ctx.shadowColor = 'rgba(0,0,0,0.8)';
+  ctx.shadowBlur = 6;
+  ctx.fillText(text, 256, 40);
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.minFilter = THREE.LinearFilter;
+  const spriteMat = new THREE.SpriteMaterial({ map: texture, transparent: true, opacity: 0.85 });
+  const sprite = new THREE.Sprite(spriteMat);
+  sprite.position.set(position.x, yOffset, position.z);
+  sprite.scale.set(14, 1.8, 1);
+  scene.add(sprite);
+}
+
+// ─── Build Everything ───────────────────────────────────────────
+buildSFLand();
+const water = buildWater();
+buildStreetGrid();
+buildParks();
+buildDowntown();
+buildGoldenGateBridge();
+buildTransamerica();
+buildFerryBuilding();
+buildCoitTower();
+buildPalaceOfFineArts();
+
+// Labels
+createLabel('Golden Gate Bridge', geoToScene(37.820, -122.478), 26);
+createLabel('Transamerica Pyramid', geoToScene(37.7952, -122.4028), 24);
+createLabel('Ferry Building', geoToScene(37.7956, -122.3935), 17);
+createLabel('Coit Tower', geoToScene(37.8024, -122.4058), 17);
+createLabel('Palace of Fine Arts', geoToScene(37.8029, -122.4484), 14);
+
+// ─── Raycasting / Tooltip ───────────────────────────────────────
+const raycaster = new THREE.Raycaster();
+const pointer = new THREE.Vector2();
+const tooltip = document.getElementById('monument-tooltip');
+
+function getAllMeshes(obj) {
+  const meshes = [];
+  obj.traverse(child => { if (child.isMesh) meshes.push(child); });
+  return meshes;
+}
+
+window.addEventListener('pointermove', (e) => {
+  pointer.x = (e.clientX / window.innerWidth) * 2 - 1;
+  pointer.y = -(e.clientY / window.innerHeight) * 2 + 1;
+
+  raycaster.setFromCamera(pointer, camera);
+
+  let hit = null;
+  for (const group of interactiveObjects) {
+    const meshes = getAllMeshes(group);
+    const intersects = raycaster.intersectObjects(meshes, false);
+    if (intersects.length > 0) {
+      hit = group;
+      break;
+    }
+  }
+
+  if (hit) {
+    tooltip.style.display = 'block';
+    tooltip.style.left = e.clientX + 'px';
+    tooltip.style.top = e.clientY + 'px';
+    tooltip.querySelector('.name').textContent = hit.userData.name;
+    tooltip.querySelector('.subtitle').textContent = hit.userData.subtitle;
+    document.body.style.cursor = 'pointer';
+  } else {
+    tooltip.style.display = 'none';
+    document.body.style.cursor = 'default';
+  }
+});
+
+// ─── Animation Loop ─────────────────────────────────────────────
+const clock = new THREE.Clock();
+
+function animate() {
+  requestAnimationFrame(animate);
+  const t = clock.getElapsedTime();
+
+  // Animate water
+  const posArr = water.mesh.geometry.attributes.position.array;
+  for (let i = 0; i < posArr.length; i += 3) {
+    const x = posArr[i];
+    const z = posArr[i + 2];
+    posArr[i + 1] = -2.6 + Math.sin(x * 0.05 + t * 0.8) * 0.15 + Math.cos(z * 0.07 + t * 0.6) * 0.1;
+  }
+  water.mesh.geometry.attributes.position.needsUpdate = true;
+
+  controls.update();
+  renderer.render(scene, camera);
+}
+
+animate();
+
+// ─── Resize ─────────────────────────────────────────────────────
+window.addEventListener('resize', () => {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
+</script>
+</body>
+</html>
